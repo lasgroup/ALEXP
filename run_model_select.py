@@ -1,7 +1,7 @@
 import numpy as np
 
 from environment.reward_generator import KernelGroupSparseMetaEnvironment
-from environment.feature_map import PolynomialMap, PeriodicMap, LinearMap, LegendreMap, UnionOfFeatureMaps, RFFMap
+from environment.feature_map import PolynomialMap, PeriodicMap, LinearMap, LegendreMap, UnionOfFeatureMaps, RFFMap, FilteredFeatureMap
 from environment.kernel import KernelFunction
 from environment.domain import ContinuousDomain
 from algorithms.acquisition import UCB
@@ -15,7 +15,7 @@ from tueplots import bundles
 from config import color_dict, line_color, shade_color, regret_label, linestyles
 
 sparsity = 2
-degree = 6
+degree = 15
 num_features = degree + 1
 # length_scales = [1,0.5,0.2,0.1,0.05]
 feature_map = LegendreMap(num_dim_x=1, degree=degree)
@@ -45,8 +45,8 @@ reward = reward_gen.sample_envs(num_envs=1)[0]
 # print('True Features', active_groups)
 
 print('Shape of eta', eta.shape)
-runs = 2
-T = 50
+runs = 1
+T = 100
 
 # model select
 cum_regrets = []
@@ -57,7 +57,7 @@ model_inds = [list(i) for i in itertools.combinations(range(degree+1), sparsity)
 
 for run in range(runs):
     evals = []
-    mw = MultWeights(num_features, model_inds, domain, feature_map, T, likelihood_std = 0.01)
+    mw = MultWeights(num_features, model_inds, domain, feature_map, T, likelihood_std=0.01)
 
     for t in range(T):
         x, x_bp = mw.select()
@@ -130,9 +130,17 @@ axes[2].fill_between(np.arange(T), np.mean(cum_regrets, axis=0) - np.std(cum_reg
 # All
 cum_regrets = []
 simple_regrets = []
+
+feature_maps = []
+for inds in model_inds:
+    eta_model = np.zeros(num_features)
+    eta_model[inds] = 1
+    feature_maps.append(FilteredFeatureMap(feature_map=feature_map, eta=eta_model))
+stacked_feature_maps = UnionOfFeatureMaps(feature_maps)
+
 for run in range(runs):
     evals = []
-    full = RegressionOracle(domain=domain, feature_map=feature_map, likelihood_std=0.01, eta=np.ones(eta.shape))
+    full = RegressionOracle(domain=domain, feature_map=stacked_feature_maps, likelihood_std=0.01, eta=np.ones(stacked_feature_maps.num_groups))
     algo = UCB(full, reward_gen.domain, beta=2.0)
 
     for t in range(T):

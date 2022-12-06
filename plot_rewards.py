@@ -4,9 +4,13 @@ from environment.reward_generator import KernelGroupSparseMetaEnvironment
 import numpy as np
 from tueplots import bundles
 from config import color_dict
+from environment.feature_map import LegendreMap, ProductOfMaps
 
-from environment.feature_map import LegendreMap
-feature_map = LegendreMap(num_dim_x=1, degree=20)
+
+# feature_map = LegendreMap(num_dim_x=1, degree=20)
+feature_map1 = LegendreMap(num_dim_x=1, degree=6)
+feature_map2 = LegendreMap(num_dim_x=1, degree=3)
+feature_map = ProductOfMaps(feature_map1, feature_map2)
 true_kernel = KernelFunction(feature_map=feature_map, sparsity=6)
 domain = ContinuousDomain(l=-np.ones(feature_map.num_dim_x), u=np.ones(feature_map.num_dim_x))
 

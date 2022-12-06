@@ -242,6 +242,7 @@ class FilteredFeatureMap(FeatureMap):
 
     def __init__(self, feature_map: FeatureMap, eta: np.ndarray):
         super().__init__(num_dim_x=feature_map.num_dim_x)
+
         assert eta.shape == (feature_map.num_groups,)
         self.eta = eta
         self.active_groups = np.where(eta > 0.0)[0]
@@ -282,10 +283,13 @@ class UnionOfFeatureMaps(FeatureMap):
         _current_size = 0
         self._groups = []
         for feature_map in feature_maps:
-            self._groups.extend([_current_size + np.array(g) for g in feature_map.groups])
             _current_size += feature_map.size
+        self._groups = [[i] for i in range(_current_size)]
+        # print('from groups:', self.size)
+        # print(_current_size)
         assert _current_size == self.size
-        assert set().union(*self.groups) == set(range(self.size))
+        # print(self.size)
+        # assert set().union(*self.groups) == set(range(self.size))
 
     @property
     def groups(self) -> List[List[int]]:
@@ -298,6 +302,31 @@ class UnionOfFeatureMaps(FeatureMap):
         feature = np.concatenate([feature_map.get_feature(x) for feature_map in self._feature_maps], axis=-1)
         assert feature.shape == (x.shape[0], self.size)
         return feature
+
+class ProductOfMaps(FeatureMap):
+    def __init__(self, map1: FeatureMap, map2: FeatureMap):
+        assert len(set([feature_map.num_dim_x for feature_map in [map1, map2]])) == 1, (
+            'The feature_maps must all have the same num_dim_x')
+        super().__init__(num_dim_x=map1.num_dim_x)
+        self.map1 = map1
+        self.map2 = map2
+        cross_size = map1.size * map2.size
+        self._groups = [[i] for i in range(cross_size)]
+
+    @property
+    def groups(self) -> List[List[int]]:
+        return self._groups
+
+    def get_feature(self, x: np.ndarray) -> np.ndarray:
+        if x.ndim == 1:
+            x = np.expand_dims(x, axis=-1)
+        assert x.ndim == 2 and x.shape[-1] == self.num_dim_x
+        feat1 = self.map1.get_feature(x).squeeze()
+        feat2 = self.map2.get_feature(x).squeeze()
+        prod_feat = []
+        for row1, row2 in zip(feat1, feat2):
+            prod_feat.append(np.tensordot(row1.squeeze(), row2.squeeze(), axes = [[],[]]).flatten())
+        return np.array(prod_feat)
 
 
 if __name__ == '__main__':

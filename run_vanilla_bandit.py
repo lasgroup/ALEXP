@@ -1,7 +1,7 @@
 import numpy as np
 
 from environment.reward_generator import KernelGroupSparseMetaEnvironment
-from environment.feature_map import PolynomialMap, PeriodicMap, LinearMap, LegendreMap, UnionOfFeatureMaps, RFFMap
+from environment.feature_map import PolynomialMap, PeriodicMap, LinearMap, LegendreMap, UnionOfFeatureMaps, RFFMap, FilteredFeatureMap
 from environment.kernel import KernelFunction
 from environment.domain import ContinuousDomain
 from algorithms.acquisition import UCB
@@ -14,7 +14,7 @@ from tueplots import bundles
 from config import color_dict, line_color, shade_color, regret_label, linestyles
 
 sparsity = 2
-degree = 6
+degree = 3
 #length_scales = [1,0.5,0.2,0.1,0.05]
 feature_map = LegendreMap(num_dim_x=1, degree=degree)
 # feature_map = RFFMap(num_dim_x=1, lengthscale=length_scales[2], feature_dim=degree)
@@ -46,52 +46,36 @@ print('True Features', active_groups)
 runs = 2
 T = 50
 
-
-
-#model select
 cum_regrets = []
 simple_regrets = []
+num_features = degree + 1
 
-# model_inds = [list(i) for i in itertools.combinations(range(degree+1), sparsity)]
-# print('choices:', model_inds)
-# meta_train_data = reward_gen.generate_uniform_meta_train_data(num_tasks=2, num_points_per_task=2)
+model_inds = [list(i) for i in itertools.combinations(range(degree+1), sparsity)]
+feature_maps = []
+for inds in model_inds:
+    eta_model = np.zeros(num_features)
+    eta_model[inds] = 1
+    feature_maps.append(FilteredFeatureMap(feature_map=feature_map, eta=eta_model))
+stacked_feature_maps = UnionOfFeatureMaps(feature_maps)
+
+num_stacked_features = sparsity * len(model_inds)
+assert stacked_feature_maps.size == num_stacked_features
 
 for run in range(runs):
-    # algos = []
-    # models = []
-    evals = []
-    # for model_ind in model_inds:
-    #     eta_model = np.zeros(eta.shape)
-    #     eta_model[model_ind] = 1
-    #     model = RegressionOracle(domain=domain, feature_map=feature_map, likelihood_std=0.01, eta = eta_model)
-    #     models.append(model)
-    # algos = [UCB(model, reward_gen.domain, beta=2.0) for model in models]
-    # weights = np.ones(len(models))
-    # etaMW = np.sqrt(np.log(len(models))/T)
 
-    oracle = RegressionOracle(domain=domain, feature_map=feature_map, likelihood_std=0.01, eta=eta)
+    evals = []
+    oracle = RegressionOracle(domain=domain, feature_map=stacked_feature_maps, likelihood_std=0.01, eta=np.ones(stacked_feature_maps.num_groups))
     algo = UCB(oracle, reward_gen.domain, beta=2.0)
     
     for t in range(T):
-        # probs = weights/np.sum(weights)
-        # i = np.random.choice(range(len(models)), 1,p=probs)
-        # algo = algos[i[0]]
-        # print('At T=', t, 'Choosed feaures:',model_inds[i[0]])
         x = algo.next()
         x_bp = algo.best_predicted()
         evaluation = reward.evaluate(x, x_bp=x_bp)
         evals.append(evaluation)
         evals_stacked = {k: np.array([dic[k] for dic in evals]) for k in evals[0]}
-        # losses = []
-        # for i, algo in enumerate(algos):
-            # update algo with new rewards
         algo.add_data(evaluation['x'], evaluation['y'])
-            #calculate the loss for new algo
-            # losses.append((algo.acquisition(x)-evaluation['y'])**2)
-
-        # update weights
-        # losses = np.array(losses).squeeze()
-        # weights = np.multiply(weights, (1-etaMW*losses/np.max(losses)))
+        if t % 10 == 0:
+            print('t=', t)
 
     """ plot regret """
     evals_stacked = {k: np.array([dic[k] for dic in evals]) for k in evals[0]}

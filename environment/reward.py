@@ -140,6 +140,11 @@ class Reward(BenchmarkEnvironment):
         self.B = rkhs_norm
         self.active_groups = kernel.active_groups
 
+        mask = np.zeros(self.kernel.feature_size)
+        for i in self.kernel.active_groups:
+            mask[self.kernel.groups[i]] = 1.0
+        self.eta = mask
+
         assert beta_min > 0
         self._beta_min = beta_min
 
@@ -159,10 +164,7 @@ class Reward(BenchmarkEnvironment):
         beta = self._rds.uniform(self._beta_min, 1, size=(self.kernel.feature_size, ))
         # sample sign
         beta *= (self._rds.random(size=(self.kernel.feature_size,)) > 0.5).astype(np.float)
-        mask = np.zeros(self.kernel.feature_size)
-        for i in self.kernel.active_groups:
-            mask[self.kernel.groups[i]] = 1.0
-        beta *= mask
+        beta *= self.eta
         beta = beta / np.linalg.norm(beta) * self.B
         return beta
 

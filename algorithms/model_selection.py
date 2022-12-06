@@ -1,12 +1,15 @@
 import numpy as np
 from algorithms.regression_oracle import RegressionOracle
 from algorithms.acquisition import UCB
+from typing import List
 
 class MultWeights():
-    def __init__(self, num_features, model_inds, domain, feature_map, T, likelihood_std = 0.01):
+    def __init__(self, num_features, model_inds, domain, feature_map, T: float, likelihood_std: float =  0.01, random_state = None):
+        self._rds = np.random if random_state is None else random_state
         self.algos = []
         self.models = []
         self.model_inds = model_inds
+        assert feature_map.size == num_features
         for model_ind in model_inds:
             eta_model = np.zeros(num_features)
             eta_model[model_ind] = 1
