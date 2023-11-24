@@ -1,7 +1,7 @@
 # ALEXP: Anytime Model Selection for Linear Bandits
 
 <p align="center">
-<img src="https://github.com/pkassraie/ALEXP/blob/main/Thumbnail.jpg?raw=true" width="400">
+<img src="https://github.com/lasgroup/ALEXP/blob/main/Thumbnail.jpg?raw=true" width="400">
 </p>
 This repository contains the code to our paper <a href=https://arxiv.org/abs/2307.12897> Anytime Model Selection for Linear Bandits</a>, NeurIPS 2023.
 We propose ALEXP, an algorithm for simultanous online optimization and feature/model selection. ALEXP is a method of probabilistic aggregation for online model selection and maintains an adaptive probability distribution based on which it iteratively samples features/models. The sampled model is then used to estimate the objective function, as a proxy for the optimization objective.
