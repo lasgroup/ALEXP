@@ -13,7 +13,7 @@ This is a torch-based repository, `requirements.txt` lists the needed packages/u
 
 ### Algorithms
 The repository contains the implementation of a few model selection algorithms. The classes are implemented as follows:
-- Adaptive Algorithms: ALEXP and <a href=https://arxiv.org/abs/1612.06246>CORRAL</a> (based on an earlier implementation by <a href=https://www.aldopacchiano.ai/>Aldo</a>), located in `algorithms/model_selection.py`.
+- Adaptive Algorithms: ALEXP and <a href=https://arxiv.org/abs/1612.06246>CORRAL</a> (based on an <a href=https://github.com/pacchiano/modelselection/blob/main/algorithmsmodsel.py>earlier implementation</a> by <a href=https://www.aldopacchiano.ai/>Aldo</a>), located in `algorithms/model_selection.py`.
 - Non-adaptive algorithms: ETC/ETS (Explore then Commit/Explore the Select), located in `algorithms/acquisition.py`.
 Naturally, we have also implemented a bandit optimization algorithms, mainly GP-UCB and Greedy, located in `algorithms/acquisition.py`.
 
