@@ -130,17 +130,18 @@ class KernelGroupSparseMetaEnvironment(MetaBenchmarkEnvironment):
         # make sure that beta is bounded away from zero
         beta = self._rds.uniform(self._beta_min, 1, (num_envs, self.kernel.feature_size))
         # sample sign
-        beta *= (self._rds.random(size=(num_envs, self.kernel.feature_size)) > 0.5).astype(np.float)
-        # introduce sparsity
-        # groups_covered = []
+        beta *= (self._rds.choice([-1, 1], size=(num_envs, self.kernel.feature_size))).astype(np.float)
         env_params = []
         for s in range(num_envs):
+            # check to make sure beta isn't zero
+            assert np.count_nonzero(beta[s].squeeze()) == self.kernel.feature_size
             # make mask
             eta_mask = np.zeros(self.kernel.num_groups)
             eta_mask[self.active_groups] = 1
             eta_to_beta_mask = self.kernel.map_eta_to_beta(eta_mask)
             beta_masked = beta[s] = eta_to_beta_mask[None, :] * beta[s]
             # make env
+            beta_masked =  beta_masked.squeeze()/np.linalg.norm(beta_masked.squeeze())
             env_param_dict = {'beta': beta_masked.squeeze()}
             env_params.append({**env_param_dict, **self.static_env_param_dict})
 

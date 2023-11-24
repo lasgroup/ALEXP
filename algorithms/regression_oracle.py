@@ -2,6 +2,8 @@ import numpy as np
 import gpytorch
 from typing import Optional, Dict, List, Tuple
 import torch
+from celer import GroupLasso
+import scipy
 from algorithms.utils import _handle_input_dimensionality
 from environment.feature_map import FeatureMap, FilteredFeatureMap
 from environment.domain import Domain
@@ -23,23 +25,17 @@ class RegressionOracle:
 
         assert domain.d == feature_map.num_dim_x, 'Feature map`s input dims must be the same as domain`s dims'
 
-
         self.likelihood_std = likelihood_std
-        self.feature_map = feature_map
+        self.full_feature_map = feature_map
         self.domain = domain
         self.input_dim = domain.d
         self.output_dim = 1
         self._normalization_stats = normalization_stats
-
-
-        self.active_groups = np.where(eta!= 0)[0]
-
-        self.feature_map = FilteredFeatureMap(feature_map=self.feature_map, eta=eta)
-
+        self.eta = eta
+        if eta is not None:
+            self.feature_map = FilteredFeatureMap(feature_map=self.full_feature_map, eta=self.eta)
 
         """  ------ Setup model ------ """
-        self.num_groups = feature_map.num_groups
-
         self.covar_module = gpytorch.kernels.LinearKernel().to(device)
         self.mean_module = gpytorch.means.ZeroMean().to(device)
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(device)
@@ -90,13 +86,11 @@ class RegressionOracle:
 
         self.X_data = np.concatenate([self.X_data, X])
         self.y_data = np.concatenate([self.y_data, y])
-
         self._num_train_points += y.shape[0]
 
         assert self.X_data.shape[0] == self.y_data.shape[0]
         assert self._num_train_points == 1 or self.X_data.shape[0] == self._num_train_points
 
-        self._reset_posterior()
 
     def confidence_intervals(self, test_x: np.ndarray, confidence: float = 0.9,
                              **kwargs) -> Tuple[np.ndarray, np.ndarray]:
@@ -122,6 +116,7 @@ class RegressionOracle:
         Returns:
             (pred_mean, pred_std) predicted mean and standard deviation corresponding to p(y_test|X_test, X_train, y_train)
         """
+        self._reset_posterior()
         if type(test_x) == torch.Tensor:
             test_x = test_x.numpy()
         if test_x.ndim == 1:
@@ -164,6 +159,7 @@ class RegressionOracle:
     def _get_feature(self, x):
         if type(x) == torch.Tensor:
             x = x.numpy()
+        assert self.eta is not None, ('First Perform Model Selection or Set Eta!')
         features = self.feature_map.get_feature(x)
         return torch.from_numpy(features).float()
 
@@ -187,18 +183,15 @@ class RegressionOracle:
             pred_dist = self.predict(test_x, return_density=True, **kwargs)
             avg_log_likelihood = pred_dist.log_prob(test_t_tensor) / test_t_tensor.shape[0]
             rmse = torch.mean(torch.pow(pred_dist.mean - test_t_tensor, 2)).sqrt()
+            # pred_dist_vect = self._vectorize_pred_dist(pred_dist)
+            # calibr_error = self._calib_error(pred_dist_vect, test_t_tensor)
+            # calibr_error_chi2 = _calib_error_chi2(pred_dist_vect, test_t_tensor)
 
-            pred_dist_vect = self._vectorize_pred_dist(pred_dist)
-            calibr_error = self._calib_error(pred_dist_vect, test_t_tensor)
-            calibr_error_chi2 = _calib_error_chi2(pred_dist_vect, test_t_tensor)
-
-            return avg_log_likelihood.cpu().item(), rmse.cpu().item(), calibr_error.cpu().item(), calibr_error_chi2
-
-#==============
+            return avg_log_likelihood.cpu().item(), rmse.cpu().item() #, calibr_error.cpu().item(), calibr_error_chi2
 
     def _reset_data(self):
-        self.X_data = torch.empty(size=(0, self.input_dim), dtype=torch.float64)
-        self.y_data = torch.empty(size=(0,), dtype=torch.float64)
+        self.X_data = torch.empty(size=(0, self.input_dim))#, dtype=torch.float64)
+        self.y_data = torch.empty(size=(0,))#, dtype=torch.float64)
         self._num_train_points = 0
 
     def _handle_input_dim(self, X, y):
@@ -227,8 +220,8 @@ class RegressionOracle:
             self.x_std = normalization_stats_dict['x_std'].reshape((self.input_dim,))
             self.y_std = normalization_stats_dict['y_std'].squeeze()
 
-    def _calib_error(self, pred_dist_vectorized, test_t_tensor):
-        return _calib_error(pred_dist_vectorized, test_t_tensor)
+    # def _calib_error(self, pred_dist_vectorized, test_t_tensor):
+    #     return _calib_error(pred_dist_vectorized, test_t_tensor)
 
     def _compute_normalization_stats(self, X, Y):
         # save mean and variance of data for normalization
@@ -282,32 +275,67 @@ class RegressionOracle:
 
         return self.train_x, self.train_t
 
-    def _vectorize_pred_dist(self, pred_dist):
-        return torch.distributions.Normal(pred_dist.mean, pred_dist.stddev)
+    # def _vectorize_pred_dist(self, pred_dist):
+    #     return torch.distributions.Normal(pred_dist.mean, pred_dist.stddev)
+
+class LassoOracle(RegressionOracle):
+    def __init__(self, domain: Domain, feature_map: FeatureMap, likelihood_std: float = 0.05,
+                 lambda_coef: Optional[float] = None, delta: float = 0.1, normalize_data: bool = False,
+                 normalization_stats: Optional[Dict] = None, random_state: Optional[np.random.RandomState] = None):
+        super().__init__(domain = domain,
+                                          feature_map = feature_map,
+                                          eta = None,
+                                          likelihood_std = likelihood_std,
+                                          normalize_data = normalize_data,
+                                          normalization_stats = normalization_stats,
+                                          random_state= random_state)
+
+        self.lambda_coef = lambda_coef
+        self.delta = delta
+
+        self.theta_hat = np.ones(shape = (1, self.full_feature_map.size))/ self.full_feature_map.size
+        self.eta = np.ones(shape =  (self.full_feature_map.num_groups,))
+        self.feature_map = self.full_feature_map
+
+    def fit_lasso(self, verbose: bool = False):
+        # contruct y and phi (block-diagonal feature matrix) for the group lasso
+        y_all = np.concatenate([y.flatten() for y in self.y_data])
+        phi_all = self.full_feature_map.get_feature(self.X_data)
+        assert phi_all.shape == (self._num_train_points, self.full_feature_map.size)
+
+        # determine the lasso lambda
+        lasso_lambda = self.min_lambda(self.delta, num_points=self._num_train_points)
+        if self.lambda_coef is not None:
+            lasso_lambda *= self.lambda_coef
+        # print('lambda', lasso_lambda)
+
+        # solve group lasso problem
+        self.learner = GroupLasso(groups=self.full_feature_map.groups,
+                             alpha=lasso_lambda,
+                             verbose=verbose, prune=True,
+                             fit_intercept=False)
+
+        self.learner.fit(phi_all, y_all)
+        # exp4 only needs the theta_hat
+        # but I will add a lasso-screening routine, to compare with a post-selection GP method...
+        self.theta_hat = self.learner.coef_.reshape((1, -1))
+        self.eta = np.array([np.linalg.norm(self.learner.coef_[g]) for g in self.full_feature_map.groups])
+        self.eta = (self.eta > 0.0).astype(np.float)
+        # print('Number of selected groups:', np.count_nonzero(self.eta), 'total is', self.full_feature_map.num_groups)
+        assert self.theta_hat.shape == (1, self.full_feature_map.size)
+        assert self.eta.shape == (self.full_feature_map.num_groups,)
+        self.feature_map = FilteredFeatureMap(feature_map=self.full_feature_map, eta=self.eta)
 
 
+    def celer_predict(self, x_test):
+        phi = self.full_feature_map.get_feature(x_test)
+        return self.learner.predict(phi)
 
-def _calib_error(pred_dist_vectorized, test_t_tensor):
-    cdf_vals = pred_dist_vectorized.cdf(test_t_tensor)
-
-    if test_t_tensor.shape[0] == 1:
-        test_t_tensor = test_t_tensor.flatten()
-        cdf_vals = cdf_vals.flatten()
-
-    num_points = test_t_tensor.shape[0]
-    conf_levels = torch.linspace(0.05, 1.0, 20)
-    emp_freq_per_conf_level = torch.sum(cdf_vals[:, None] <= conf_levels, dim=0).float() / num_points
-
-    calib_rmse = torch.sqrt(torch.mean((emp_freq_per_conf_level - conf_levels) ** 2))
-    return calib_rmse
-
-
-def _calib_error_chi2(pred_dist_vectorized, test_t_tensor):
-    import scipy.stats
-    z2 = (((pred_dist_vectorized.mean - test_t_tensor) / pred_dist_vectorized.stddev) ** 2).detach().numpy()
-    f = lambda p: np.mean(z2 < scipy.stats.chi2.ppf(p, 1))
-    conf_levels = np.linspace(0.05, 1, 20)
-    accs = np.array([f(p) for p in conf_levels])
-    return np.sqrt(np.mean((accs - conf_levels) ** 2))
-
-
+    def min_lambda(self, delta: float, num_points: int):
+        assert 0 < delta <= 1.
+        n = num_points
+        p = self.full_feature_map.num_groups
+        d = max([len(g) for g in self.full_feature_map.groups])
+        lambda_min = 8 * self.likelihood_std / np.sqrt(n)
+        lambda_min *= np.sqrt(1 + 5/np.sqrt(2)*np.sqrt(d * np.log(8 * p/ delta)) + 12/np.sqrt(2)*np.log(8*p/delta))
+        return lambda_min

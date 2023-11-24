@@ -2,7 +2,8 @@ import numpy as np
 from sklearn.preprocessing import PolynomialFeatures
 from functools import cached_property
 from typing import List, Optional, Union
-
+import itertools
+import math
 
 class FeatureMap:
 
@@ -238,6 +239,77 @@ class LegendreMap(FeatureMap):
             raise NotImplementedError
 
 
+class CombOfLegendreMaps(FeatureMap):
+    def __init__(self, num_dim_x: int,
+                 max_degree: int = 10,
+                 sparsity: int = 4,
+                 domain_l: Optional[np.ndarray] = None,
+                 domain_u: Optional[np.ndarray] = None):
+        super().__init__(num_dim_x)
+        assert num_dim_x in [1], f'num_dim_x must be 1, but got {num_dim_x}'
+        self.max_degree = max_degree
+        self.sparsity = sparsity
+
+        # built the groups:
+        combinations = list(itertools.combinations(range(0, self.max_degree + 1), self.sparsity))
+        # Convert each combination tuple to a list
+        self.combinations = [list(combination) for combination in combinations]
+        # double check
+        assert len(self.combinations) == math.comb(self.max_degree+1, self.sparsity)
+        self.length = len(self.combinations)*self.sparsity
+
+        # check and set legendre polynomial domain
+        assert domain_l is None or domain_l.shape == (self.num_dim_x, )
+        assert domain_u is None or domain_u.shape == (self.num_dim_x,)
+        self._domain_l = domain_l if domain_l is not None else - 1.1 * np.ones(num_dim_x)
+        self._domain_u = domain_u if domain_u is not None else 1.1 * np.ones(num_dim_x)
+
+    @cached_property
+    def groups(self) -> List[List[int]]:
+        if self.num_dim_x == 1:
+            arr = np.arange(self.length)
+            # Reshape the array into a 2D array with rows of length a
+            arr = arr.reshape((-1, self.sparsity))
+            # Convert the 2D array into a list of lists
+            group_inds = arr.tolist()
+        else:
+            raise NotImplementedError
+        return group_inds
+
+    def get_feature(self, x: np.ndarray) -> np.ndarray:
+        if x.ndim == 0:
+            assert self.num_dim_x == 1
+            x = x.reshape((1, 1))
+        if x.ndim == 1:
+            x = np.expand_dims(x, axis=-1)
+        assert x.ndim == 2, x.shape[-1] == self.num_dim_x
+        if self.num_dim_x == 1:
+            features = np.zeros((x.shape[0], self.length))
+            ind_count = 0
+            for ind_list in self.combinations:
+                for i in ind_list:
+                    features[:, ind_count] = np.squeeze(self._legendre_feature_fn(x, i, dim_of_x=0))
+                    ind_count += 1
+            return features
+        else:
+            raise NotImplementedError('Can only support 1-dimensional x')
+
+    def _legendre_feature_fn(self, x: np.ndarray, degree: int, dim_of_x: int):
+        assert dim_of_x < self.num_dim_x
+        assert degree >= 0
+        coef = np.zeros(degree + 1)
+        coef[-1] = 1
+        poly = np.polynomial.Legendre(coef, domain=[self._domain_l[dim_of_x], self._domain_u[dim_of_x]])
+        return poly(x)
+
+    @property
+    def _num_features(self) -> int:
+        if self.num_dim_x == 1:
+            return self.length
+        else:
+            raise NotImplementedError
+
+
 class FilteredFeatureMap(FeatureMap):
 
     def __init__(self, feature_map: FeatureMap, eta: np.ndarray):
@@ -265,13 +337,12 @@ class FilteredFeatureMap(FeatureMap):
             x = np.expand_dims(x, axis=-1)
         assert x.ndim == 2 and x.shape[-1] == self.num_dim_x
         filtered_features = self._wrapped_feature_map.get_feature(x)[:, self.active_indices]
-        filtered_features *= np.sqrt(self.eta[self.active_indices])
+        #filtered_features *= np.sqrt(self.eta[self.active_indices])
         assert filtered_features.shape == (x.shape[0], self.size)
         return filtered_features
 
 
 class UnionOfFeatureMaps(FeatureMap):
-
     def __init__(self, feature_maps: List[FeatureMap]):
         assert len(set([feature_map.num_dim_x for feature_map in feature_maps])) == 1, (
             'The feature_maps must all have the same num_dim_x')
@@ -329,9 +400,12 @@ class ProductOfMaps(FeatureMap):
         return np.array(prod_feat)
 
 
+
+
 if __name__ == '__main__':
-    x = np.zeros(77)
-    map = PeriodicMap(num_dim_x=1, num_freqs_per_group=3, num_groups=5)
+    x = np.ones(5)
+    map = CombOfLegendreMaps(num_dim_x=1, sparsity=2, max_degree=3)
+    print(len(map.groups))
     phi = map.get_feature(x)
-    print(phi)
+    print('CombOfLeg:', phi)
 

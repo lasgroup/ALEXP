@@ -73,7 +73,7 @@ class BenchmarkEnvironment(Environment):
             solution = solver.minimize(lambda x: self.f(x))
             return solution[1]
         elif isinstance(self.domain, DiscreteDomain):
-            return np.argmin(self.f(self.domain.points))
+            return np.min(self.f(self.domain.points))
 
     @property
     def normalization_stats(self):
@@ -140,10 +140,10 @@ class Reward(BenchmarkEnvironment):
         self.B = rkhs_norm
         self.active_groups = kernel.active_groups
 
-        mask = np.zeros(self.kernel.feature_size)
-        for i in self.kernel.active_groups:
-            mask[self.kernel.groups[i]] = 1.0
-        self.eta = mask
+        # mask = np.zeros(self.kernel.feature_size)
+        # for i in self.kernel.active_groups:
+        #     mask[self.kernel.groups[i]] = 1.0
+        # self.eta = mask
 
         assert beta_min > 0
         self._beta_min = beta_min
@@ -160,13 +160,16 @@ class Reward(BenchmarkEnvironment):
         return self._determine_minimum()
 
     def _sample_beta(self) -> np.ndarray:
-        # make sure that beta is bounded away from zero
-        beta = self._rds.uniform(self._beta_min, 1, size=(self.kernel.feature_size, ))
-        # sample sign
-        beta *= (self._rds.random(size=(self.kernel.feature_size,)) > 0.5).astype(np.float)
-        beta *= self.eta
-        beta = beta / np.linalg.norm(beta) * self.B
-        return beta
+        # DO NOT CALL THIS METHOD WITHOUT A PREDEFINED BETA
+        raise NotImplementedError
+
+        # # to make sure that beta is bounded away from zero, replace 0 with beta_min
+        # beta = self._rds.uniform(self._beta_min, 1, size=(self.kernel.feature_size, ))
+        # # sample sign
+        # beta *= (self._rds.random(size=(self.kernel.feature_size,)) > 0.5).astype(np.float)
+        # beta *= self.eta
+        # beta = beta / np.linalg.norm(beta) * self.B
+        # return beta
 
     def f(self, x: np.ndarray) -> np.ndarray:
         psi = self.kernel.get_feature(x)
